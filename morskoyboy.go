@@ -46,18 +46,18 @@ func (b *Board) safeCell(x, y int) Cell {
 	return b[y][x]
 }
 
-func (b *Board) CellIcon(x, y int) byte {
+func (b *Board) CellIcon(x, y int) rune {
 	c := b[y][x]
 	if c.IsFired() {
 		if c.IsBoat() {
-			return 'X'
+			return pic.Hit
 		} else {
-			return '.'
+			return pic.Miss
 		}
 	}
 	for _, v := range []struct{ xo, yo int }{{-1, -1}, {1, 1}, {-1, 1}, {1, -1}} {
 		if corner := b.safeCell(x+v.xo, y+v.yo); corner.IsFired() && corner.IsBoat() {
-			return '~'
+			return pic.Water
 		}
 	}
 	return ' '
@@ -137,7 +137,7 @@ func (b *Board) PlaceBoat(x0, y0, x1, y1 int) bool {
 // | | | | | | | | | | |
 // +-+-+-+-+-+-+-+-+-+-+
 
-type Screen [25][80]byte
+type Screen [25][80]rune
 
 func (s *Screen) Clear() {
 	for y := range s {
@@ -150,7 +150,7 @@ func (s *Screen) Clear() {
 func (s *Screen) Print() {
 	os.Stdout.Write(clear)
 	for y := range s {
-		fmt.Printf("%s\n", s[y][:])
+		fmt.Printf("%s\n", string(s[y][:]))
 	}
 }
 
@@ -158,15 +158,16 @@ func (s *Screen) RenderBoard(b *Board, screenXoff, screenYoff int, all bool) {
 	var lastY int
 	for y := range b {
 		sy := screenYoff + y*2 + 1
-		s[sy][screenXoff] = '0' + byte(y)
+		s[sy][screenXoff] = rune('0' + y)
 		for x, c := range b[y] {
 			sx := screenXoff + (x+1)*3
-			s[screenYoff][sx] = 'A' + byte(x)
+			s[screenYoff][sx] = lang.FirstLetter + rune(x)
 			tile := b.CellIcon(x, y)
 			if all && tile == ' ' && c.IsBoat() {
-				tile = 'B'
+				//tile = 'B'
+				tile = pic.Boat
 			}
-			s[sy][sx] = tile
+			s[sy][sx-1] = tile
 			s[sy][sx+1] = '|'
 			s[sy+1][sx] = '-'
 			s[sy+1][sx-1] = '-'
@@ -174,19 +175,59 @@ func (s *Screen) RenderBoard(b *Board, screenXoff, screenYoff int, all bool) {
 		}
 		lastY = sy + 1
 	}
-	copy(s[lastY+2][screenXoff:], []byte(fmt.Sprintf("Boat parts remain: %d", b.UnhitBoatCellsRemain())))
+	copy(s[lastY+2][screenXoff:], []rune(fmt.Sprintf("Boat parts remain: %d", b.UnhitBoatCellsRemain())))
 }
 
 var clear []byte
+var lang Lang
+var pic Pic
 
 var (
-	devMode = flag.Bool("dev", false, "dev mode; random boat placement and boats always visible")
+	devMode   = flag.Bool("dev", false, "dev mode; random boat placement and boats always visible")
+	langMode  = flag.String("lang", "ru", "which language to use, ru or en")
+	emojiMode = flag.Bool("emoji", true, "how to draw the board: ascii or emoji")
+)
+
+type Lang struct {
+	FirstLetter rune
+	LastLetter  rune
+	RightChar   rune
+	DownChar    rune
+}
+
+var (
+	ru = Lang{'А', 'Й', 'П', 'Н'}
+	en = Lang{'A', 'J', 'R', 'D'}
+)
+
+type Pic struct {
+	Boat  rune
+	Water rune // logically deduced to be water
+	Miss  rune
+	Hit   rune
+}
+
+var (
+	ascii = Pic{'B', '~', '.', 'X'}
+	emoji = Pic{'\U0001F6A4', '🌊', '💦', '🔥'}
 )
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	flag.Parse()
+	if *langMode == "ru" {
+		lang = ru
+	} else {
+		lang = en
+	}
+	if *emojiMode {
+		pic = emoji
+	} else {
+		pic = ascii
+	}
+
 	clear, _ = exec.Command("clear").Output()
+
 	var s Screen
 
 	var p1, p2 Board
@@ -211,12 +252,12 @@ func main() {
 					goto Boat
 				}
 			}
-			in = strings.TrimSpace(strings.ToUpper(in))
 			if boat.len == 1 && len(in) == 2 {
-				in += "R"
+				in += string(lang.RightChar)
 			}
-			if len(in) != 3 || in[0] < 'A' || in[0] > 'J' || in[1] < '0' || in[1] > '9' ||
-				(in[2] != 'R' && in[2] != 'D') {
+			var inr []rune
+			inr = []rune(strings.TrimSpace(strings.ToUpper(in)))
+			if len(inr) != 3 || inr[0] < lang.FirstLetter || inr[0] > lang.LastLetter || inr[1] < '0' || inr[1] > '9' || (inr[2] != lang.RightChar && inr[2] != lang.DownChar) {
 				if *devMode {
 					log.Fatalf("bad input %q", in)
 				} else {
@@ -225,16 +266,16 @@ func main() {
 				}
 				goto Boat
 			}
-			dir := in[2]
+			dir := inr[2]
 			var fx, fy int
-			if dir == 'R' {
+			if dir == lang.RightChar {
 				fx = 1
 			}
-			if dir == 'D' {
+			if dir == lang.DownChar {
 				fy = 1
 			}
-			x := int(in[0] - 'A')
-			y := int(in[1] - '0')
+			x := int(inr[0] - lang.FirstLetter)
+			y := int(inr[1] - '0')
 			if !b.PlaceBoat(x, y, x+fx*int(boat.len-1), y+fy*int(boat.len-1)) {
 				if !*devMode {
 					fmt.Println("CONFLICT")
@@ -256,15 +297,16 @@ Game:
 
 		fmt.Printf("%s> ", players[turn])
 		var in string
+		var inr []rune
 		if _, err := fmt.Scanf("%s\n", &in); err != nil {
 			continue
 		}
-		in = strings.TrimSpace(strings.ToUpper(in))
-		if len(in) != 2 || in[0] < 'A' || in[0] > 'J' || in[1] < '0' || in[1] > '9' {
+		inr = []rune(strings.TrimSpace(strings.ToUpper(in)))
+		if len(inr) != 2 || inr[0] < lang.FirstLetter || inr[0] > lang.LastLetter || inr[1] < '0' || inr[1] > '9' {
 			continue
 		}
-		x := int(in[0] - 'A')
-		y := int(in[1] - '0')
+		x := int(inr[0] - lang.FirstLetter)
+		y := int(inr[1] - '0')
 		target := boards[turn]
 		target.Fire(x, y)
 		if target.AllHit() {
@@ -285,7 +327,14 @@ Game:
 
 func randomPlacement() string {
 	return fmt.Sprintf("%c%v%c",
-		"ABCDEFGHIJ"[rand.Intn(10)],
+		lang.FirstLetter+rune(rand.Intn(10)),
 		rand.Intn(10),
-		"RD"[rand.Intn(2)])
+		downOrRight(rand.Intn(2)))
+}
+
+func downOrRight(r int) rune {
+	if r == 0 {
+		return lang.DownChar
+	}
+	return lang.RightChar
 }
