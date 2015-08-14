@@ -50,14 +50,14 @@ func (b *Board) CellIcon(x, y int) rune {
 	c := b[y][x]
 	if c.IsFired() {
 		if c.IsBoat() {
-			return 'X'
+			return pic.Hit
 		} else {
-			return '.'
+			return pic.Miss
 		}
 	}
 	for _, v := range []struct{ xo, yo int }{{-1, -1}, {1, 1}, {-1, 1}, {1, -1}} {
 		if corner := b.safeCell(x+v.xo, y+v.yo); corner.IsFired() && corner.IsBoat() {
-			return '~'
+			return pic.Water
 		}
 	}
 	return ' '
@@ -165,7 +165,7 @@ func (s *Screen) RenderBoard(b *Board, screenXoff, screenYoff int, all bool) {
 			tile := b.CellIcon(x, y)
 			if all && tile == ' ' && c.IsBoat() {
 				//tile = 'B'
-				tile = rune('\U0001F6A4')
+				tile = pic.Boat
 			}
 			s[sy][sx-1] = tile
 			s[sy][sx+1] = '|'
@@ -180,15 +180,12 @@ func (s *Screen) RenderBoard(b *Board, screenXoff, screenYoff int, all bool) {
 
 var clear []byte
 var lang Lang
+var pic Pic
 
 var (
-	devMode  = flag.Bool("dev", false, "dev mode; random boat placement and boats always visible")
-	langMode = flag.String("lang", "ru", "which language to use, ru or en")
-)
-
-var (
-	ru = Lang{'А', 'Й', 'П', 'Н'}
-	en = Lang{'A', 'J', 'R', 'D'}
+	devMode   = flag.Bool("dev", false, "dev mode; random boat placement and boats always visible")
+	langMode  = flag.String("lang", "ru", "which language to use, ru or en")
+	emojiMode = flag.Bool("emoji", true, "how to draw the board: ascii or emoji")
 )
 
 type Lang struct {
@@ -198,6 +195,23 @@ type Lang struct {
 	DownChar    rune
 }
 
+var (
+	ru = Lang{'А', 'Й', 'П', 'Н'}
+	en = Lang{'A', 'J', 'R', 'D'}
+)
+
+type Pic struct {
+	Boat  rune
+	Water rune // logically deduced to be water
+	Miss  rune
+	Hit   rune
+}
+
+var (
+	ascii = Pic{'B', '~', '.', 'X'}
+	emoji = Pic{'\U0001F6A4', '🌊', '💦', '🔥'}
+)
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	flag.Parse()
@@ -205,6 +219,11 @@ func main() {
 		lang = ru
 	} else {
 		lang = en
+	}
+	if *emojiMode {
+		pic = emoji
+	} else {
+		pic = ascii
 	}
 
 	clear, _ = exec.Command("clear").Output()
